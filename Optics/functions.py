@@ -129,3 +129,22 @@ def RK4_step(funcs, x, h, *args):
             else:
                 k[j][i] = h * funcs[j](x + h, *tuple(a + b for a, b in zip(args, tuple([k[l][i-1] for l in range(len(funcs))]))))  # use k from previous i
     return tuple(a + b for a, b in zip(args, tuple([(k[j][0]+2*k[j][1]+2*k[j][2]+k[j][3])/6 for j in range(len(funcs))])))
+
+def slt_n2(wl,T):
+    """
+    Sellmeier equation for refractive index of stoichiometric lithium tantalate (SLT)
+    wl: wavelength in micrometers
+    T: temperature in Celsius
+    returns: refractive index squared n^2
+    """
+    A = 4.502483
+    B = 0.007294
+    C = 0.185087
+    D = -0.02357
+    E = 0.073423
+    F = 0.199595
+    G = 0.001
+    H = 7.99724
+    b = 3.483933E-8*(T+273.15)**2
+    c = 1.607839E-8*(T+273.15)**2
+    return A + ((B+b)/(wl**2 - (C+c)**2)) + (E/(wl**2 - F**2)) + (G/(wl**2 - H**2)) + D*wl**2
