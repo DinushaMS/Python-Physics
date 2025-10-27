@@ -148,3 +148,34 @@ def slt_n2(wl,T):
     b = 3.483933E-8*(T+273.15)**2
     c = 1.607839E-8*(T+273.15)**2
     return A + ((B+b)/(wl**2 - (C+c)**2)) + (E/(wl**2 - F**2)) + (G/(wl**2 - H**2)) + D*wl**2
+
+def calcPhonon(kxa,kya,kza):
+    m11 = 4 - np.cos(kxa/2 + kya/2)  - np.cos(kxa/2 + kza/2) - np.cos(kxa/2 - kya/2) - np.cos(kxa/2 - kza/2)
+    m12 = - np.cos(kxa/2 + kya/2)  + np.cos(kxa/2 - kya/2)
+    m13 = - np.cos(kxa/2 + kza/2)  + np.cos(kxa/2 - kza/2)
+    m22 = 4 - np.cos(kxa/2 + kya/2)  - np.cos(kya/2 + kza/2) - np.cos(kxa/2 - kya/2) - np.cos(kya/2 - kza/2)
+    m23 = - np.cos(kya/2 + kza/2)  + np.cos(kya/2 - kza/2)
+    m33 = 4 - np.cos(kxa/2 + kza/2)  - np.cos(kya/2 + kza/2) - np.cos(kxa/2 - kza/2) - np.cos(kya/2 - kza/2)
+    a = -1
+    b = m11 + m22 + m33
+    c =  m12*m12 + m13*m13 + m23*m23 - m11*m22 - m11*m33 - m22*m33
+    d = m11*m22*m33 +2*m12*m13*m23 - m12*m12*m33 - m13*m13*m22 - m23*m23*m11
+
+    del0 = b**2-3*a*c
+    del1 = 2*b**3-9*a*b*c+27*a**2*d
+    if del0==0:
+        cc=((del1+(del1**2-4*del0**3))/2)**(1/3)
+    else:
+        cc=((del1-(del1**2-4*del0**3))/2)**(1/3)
+
+    #h1 = 1
+    h2 = (-1+(-3)**0.5)/2
+    #h3 = (-1-(-3)**0.5)/2
+
+    x1 = (b+h2**0*cc+(del0/(h2**0*cc)))/(-3*a)
+    x2 = (b+h2**1*cc+(del0/(h2**1*cc)))/(-3*a)
+    x3 = (b+h2**2*cc+(del0/(h2**2*cc)))/(-3*a)
+
+    p = np.poly1d([a,b,c,d])
+    res=p.r
+    return np.real(res[0])**0.5,np.real(res[1])**0.5,np.real(res[2])**0.5,
