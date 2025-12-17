@@ -4,9 +4,9 @@ l2 (nm) 1100
 tp1 (fs) 260
 tp2 (fs) 260
 tp3 (fs) 200
-tmin (fs) -2000
+tmin (fs) -2500
 tmax (fs) 5500
-floor (a.u.) 10
+floor (a.u.) 100
 nuR1 (cm^-1) [650, 730]
 T21 (fs) [500, 500]
 A1 (cm^-3) [3e+25, 0.0]

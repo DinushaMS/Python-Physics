@@ -4,65 +4,24 @@ import matplotlib.pyplot as plt
 import itertools
 
 class TdCARS:
-    def __init__(self, cars_file_path):
-        #cars_file_path = r"D:\Academic\URI\Research\Data_and_Results\experimental_data\2024\CARS\Aug_07\LNB_1.dat"
-        #Read notes file
-        cars_notes_file_path = cars_file_path[:-4]+"_Notes.dat"
-        self.notes_df = pd.read_csv(cars_notes_file_path, sep="\t",header=None)
-
-        # Extract parameters from notes
-        self.sample = self.notes_df.loc[self.notes_df[0] == 'SMP'][1].tolist()[0]
-        self._wl3 = float(self.notes_df.loc[self.notes_df[0] == 'Ti-Sa'][1].tolist()[0])
-        self.wl1 = float(self.notes_df.loc[self.notes_df[0] == 'OPO1'][1].tolist()[0])
-        self.wl2 = float(self.notes_df.loc[self.notes_df[0] == 'OPO2'][1].tolist()[0])
-        self._mono = float(self.notes_df.loc[self.notes_df[0] == 'MONO'][1].tolist()[0])
-        self.spectral_window = [float(x) for x in self.notes_df.loc[self.notes_df[0] == 'Spectral window (px)'][1].tolist()[0].split(' to ')]
-        self.notes_version = float(self.notes_df.loc[self.notes_df[0] == 'Version'][1].tolist()[0])
-
-        # Read spectra and floor data files
-        cars_spectra_file_path = cars_file_path[:-4]+"_Spectra.dat"
-        cars_floor_file_path = cars_file_path[:-4]+"_Floor.dat"
-        spectra_data = np.loadtxt(cars_spectra_file_path, delimiter='\t')
-        cars_floor = np.loadtxt(cars_floor_file_path, delimiter='\t')
-        self.td_arr = spectra_data[:,0]
-        self.attSpectra = spectra_data[:,1]
-        self.rawSpectra = spectra_data[:,2:]
-
-        rCnt,cCnt = len(self.rawSpectra[:,0]),len(self.rawSpectra[0,:])
-        att2d = np.zeros([rCnt,cCnt])
-        floor2d = np.zeros([rCnt,cCnt])
-        curr_att = 1
-        curr_floor_idx = 0
-        for i in range(rCnt):
-            if not curr_att == self.attSpectra[i]:
-                curr_att = self.attSpectra[i]
-                curr_floor_idx += 1
-            else:
-                pass
-            att2d[i,:] = np.ones(cCnt)*curr_att
-            floor2d[i,:] = cars_floor[curr_floor_idx,:]
-
-        self.spectra = np.multiply((self.rawSpectra-floor2d),att2d)
-        self.spectra_sc_full = self.spectra+np.abs(np.min(self.spectra))
-
-        #imprrot experimental CARS transient data
-        data = np.loadtxt(cars_file_path, delimiter='\t')
-        self.td_exp = data[:,0]
-        self.signal_exp = data[:,1]
-        self.int_signal = data[:,2]
-        self.attenuation = data[:,3]
-        self.signal_exp_corrected = self.signal_exp.copy()
-        self.att_exp_corrected = self.attenuation.copy()
-        self.wl_as = self._px2wl(np.arange(2048))
-        self.wn_as = self._px2wn(np.arange(2048))
-
-        self.tp1,self.tp2,self.tp3 = 260,260,220  # Pulse durations [fs]
-        self.tmin,self.tmax = -3000,6000  # Time delay range [fs]
-        self.floor = 100  # Baseline signal level
-        self.nuR1 = np.array([730,800])  # Raman shift frequencies [cm^-1]
-        self.T21 = np.array([377,300])  # Dephasing times [fs]
-        self.A1 = np.array([1.9e25,0])  # Amplitudes of Raman modes [au]
+    def __init__(self, sample, wl1, wl2, _wl3, _mono, td_exp, signal_exp, spectra, attenuation,tp1, tp2, tp3, tmin, tmax, floor, nuR1, T21, A1):
+        self.tp1,self.tp2,self.tp3 = tp1, tp2, tp3  # Pulse durations [fs]
+        self.tmin,self.tmax = tmin, tmax  # Time delay range [fs]
+        self.floor = floor  # Baseline signal level
+        self.nuR1 = nuR1  # Raman shift frequencies [cm^-1]
+        self.T21 = T21  # Dephasing times [fs]
+        self.A1 = A1  # Amplitudes of Raman modes [au]
         self.phi1 = 0  # Phase of first Raman mode [rad]
+
+        self.sample = sample
+        self.wl1 = wl1  # Pump wavelength [nm]
+        self.wl2 = wl2  # Stokes wavelength [nm]
+        self._wl3 = _wl3  # Probe wavelength [nm]
+        self._mono = _mono  # Monochromator setting [nm]
+        self.td_arr = td_exp  # Experimental time delays [fs]
+        self.signal_exp = signal_exp  # Experimental CARS signal [a.u.]
+        self.spectra = spectra  # CARS spectra [a.u.]
+        self.attenuation = attenuation  # Attenuation values [a.u.]
 
         self.c = 2.99792e10  # speed of light [cm/s]
         w1 = 1e7 * 2 * np.pi * self.c / self.wl1
@@ -72,6 +31,82 @@ class TdCARS:
         self.wr1 = (self.wt - wR1) * 1e-15
         self.nut = self.wt / (2 * np.pi * self.c)
         self.target_as_wl = 1/(1/self._wl3 + 1/self.wl1 - 1/self.wl2)
+
+        self.signal_exp_corrected = self.signal_exp.copy()
+        self.att_exp_corrected = self.attenuation.copy()
+        self.wl_as = self._px2wl(np.arange(2048))
+        self.wn_as = self._px2wn(np.arange(2048))
+        self.spectra_sc_full = self.spectra+np.abs(np.min(self.spectra))
+
+    @classmethod
+    def from_file(cls, cars_file_path):
+        #cars_file_path = r"D:\Academic\URI\Research\Data_and_Results\experimental_data\2024\CARS\Aug_07\LNB_1.dat"
+        #Read notes file
+        cars_notes_file_path = cars_file_path[:-4]+"_Notes.dat"
+        notes_df = pd.read_csv(cars_notes_file_path, sep="\t",header=None)
+
+        # Extract parameters from notes
+        sample = notes_df.loc[notes_df[0] == 'SMP'][1].tolist()[0]
+        _wl3 = float(notes_df.loc[notes_df[0] == 'Ti-Sa'][1].tolist()[0])
+        wl1 = float(notes_df.loc[notes_df[0] == 'OPO1'][1].tolist()[0])
+        wl2 = float(notes_df.loc[notes_df[0] == 'OPO2'][1].tolist()[0])
+        _mono = float(notes_df.loc[notes_df[0] == 'MONO'][1].tolist()[0])
+        #self.spectral_window = [float(x) for x in self.notes_df.loc[self.notes_df[0] == 'Spectral window (px)'][1].tolist()[0].split(' to ')]
+        #self.notes_version = float(self.notes_df.loc[self.notes_df[0] == 'Version'][1].tolist()[0])
+
+        # Read spectra and floor data files
+        cars_spectra_file_path = cars_file_path[:-4]+"_Spectra.dat"
+        cars_floor_file_path = cars_file_path[:-4]+"_Floor.dat"
+        spectra_data = np.loadtxt(cars_spectra_file_path, delimiter='\t')
+        cars_floor = np.loadtxt(cars_floor_file_path, delimiter='\t')
+        #td_arr = spectra_data[:,0]
+        attSpectra = spectra_data[:,1]
+        rawSpectra = spectra_data[:,2:]
+
+        rCnt,cCnt = len(rawSpectra[:,0]),len(rawSpectra[0,:])
+        att2d = np.zeros([rCnt,cCnt])
+        floor2d = np.zeros([rCnt,cCnt])
+        curr_att = 1
+        curr_floor_idx = 0
+        for i in range(rCnt):
+            if not curr_att == attSpectra[i]:
+                curr_att = attSpectra[i]
+                curr_floor_idx += 1
+            else:
+                pass
+            att2d[i,:] = np.ones(cCnt)*curr_att
+            floor2d[i,:] = cars_floor[curr_floor_idx,:]
+
+        spectra = np.multiply((rawSpectra-floor2d),att2d)
+
+        #imprrot experimental CARS transient data
+        data = np.loadtxt(cars_file_path, delimiter='\t')
+        td_exp = data[:,0]
+        signal_exp = data[:,1]
+        #self.int_signal = data[:,2]
+        attenuation = data[:,3]
+
+        tp1,tp2,tp3 = 260,260,220  # Pulse durations [fs]
+        tmin,tmax = -3000,6000  # Time delay range [fs]
+        floor = 100  # Baseline signal level
+        nuR1 = np.array([730,800])  # Raman shift frequencies [cm^-1]
+        T21 = np.array([377,300])  # Dephasing times [fs]
+        A1 = np.array([1.9e25,0])  # Amplitudes of Raman modes [au]
+        return cls(sample, wl1, wl2, _wl3, _mono, td_exp, signal_exp, spectra, attenuation,tp1, tp2, tp3, tmin, tmax, floor, nuR1, T21, A1)
+    
+    @classmethod
+    def from_params(cls, wl1, wl2, tp1, tp2, tp3, tmin, tmax, floor, nuR, T2, A):
+        sample = "Mock_Sample"
+        _wl3 = 800  # Example probe wavelength [nm]
+        _mono = 750  # Example monochromator setting [nm]
+        td_exp = np.arange(tmin, tmax, 20)  # Example experimental time delays [fs]
+        signal_exp = np.zeros_like(td_exp)  # Empty experimental signal array
+        spectra = np.zeros((len(td_exp), 2048))  # Empty spectra array
+        attenuation = np.ones_like(td_exp)  # Example attenuation array
+        T21 = T2
+        nuR1 = nuR
+        A1 = A
+        return cls(sample, wl1, wl2, _wl3, _mono, td_exp, signal_exp, spectra, attenuation,tp1, tp2, tp3, tmin, tmax, floor, nuR1, T21, A1)
 
     @property
     def mono(self):
