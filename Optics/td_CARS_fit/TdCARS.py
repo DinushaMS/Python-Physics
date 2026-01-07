@@ -4,14 +4,15 @@ import matplotlib.pyplot as plt
 import itertools
 
 class TdCARS:
-    def __init__(self, sample, wl1, wl2, _wl3, _mono, td_exp, signal_exp, spectra, attenuation,tp1, tp2, tp3, tmin, tmax, floor, nuR1, T21, A1):
+    def __init__(self, notes_df, sample, wl1, wl2, _wl3, _mono, td_exp, signal_exp, spectra, attenuation,tp1, tp2, tp3, tmin, tmax, floor, nuR1, T21, A1, phi=0):
+        self.notes_df = notes_df
         self.tp1,self.tp2,self.tp3 = tp1, tp2, tp3  # Pulse durations [fs]
         self.tmin,self.tmax = tmin, tmax  # Time delay range [fs]
         self.floor = floor  # Baseline signal level
         self.nuR1 = nuR1  # Raman shift frequencies [cm^-1]
         self.T21 = T21  # Dephasing times [fs]
         self.A1 = A1  # Amplitudes of Raman modes [au]
-        self.phi1 = 0  # Phase of first Raman mode [rad]
+        self.phi1 = phi  # Phase of first Raman mode [rad]
 
         self.sample = sample
         self.wl1 = wl1  # Pump wavelength [nm]
@@ -22,6 +23,10 @@ class TdCARS:
         self.signal_exp = signal_exp  # Experimental CARS signal [a.u.]
         self.spectra = spectra  # CARS spectra [a.u.]
         self.attenuation = attenuation  # Attenuation values [a.u.]
+
+        if len(td_exp) != len(signal_exp):
+            self.signal_exp = self.signal_exp[0:len(td_exp)]
+            self.attenuation = self.attenuation[0:len(td_exp)]
 
         self.c = 2.99792e10  # speed of light [cm/s]
         w1 = 1e7 * 2 * np.pi * self.c / self.wl1
@@ -59,7 +64,7 @@ class TdCARS:
         cars_floor_file_path = cars_file_path[:-4]+"_Floor.dat"
         spectra_data = np.loadtxt(cars_spectra_file_path, delimiter='\t')
         cars_floor = np.loadtxt(cars_floor_file_path, delimiter='\t')
-        #td_arr = spectra_data[:,0]
+        td_exp = spectra_data[:,0]
         attSpectra = spectra_data[:,1]
         rawSpectra = spectra_data[:,2:]
 
@@ -81,7 +86,7 @@ class TdCARS:
 
         #imprrot experimental CARS transient data
         data = np.loadtxt(cars_file_path, delimiter='\t')
-        td_exp = data[:,0]
+        #td_exp = data[:,0]
         signal_exp = data[:,1]
         #self.int_signal = data[:,2]
         attenuation = data[:,3]
@@ -92,10 +97,10 @@ class TdCARS:
         nuR1 = np.array([730,800])  # Raman shift frequencies [cm^-1]
         T21 = np.array([377,300])  # Dephasing times [fs]
         A1 = np.array([1.9e25,0])  # Amplitudes of Raman modes [au]
-        return cls(sample, wl1, wl2, _wl3, _mono, td_exp, signal_exp, spectra, attenuation,tp1, tp2, tp3, tmin, tmax, floor, nuR1, T21, A1)
+        return cls(notes_df, sample, wl1, wl2, _wl3, _mono, td_exp, signal_exp, spectra, attenuation,tp1, tp2, tp3, tmin, tmax, floor, nuR1, T21, A1)
     
     @classmethod
-    def from_params(cls, wl1, wl2, tp1, tp2, tp3, tmin, tmax, floor, nuR, T2, A):
+    def from_params(cls, wl1, wl2, tp1, tp2, tp3, tmin, tmax, floor, nuR, T2, A, phi):
         sample = "Mock_Sample"
         _wl3 = 800  # Example probe wavelength [nm]
         _mono = 750  # Example monochromator setting [nm]
@@ -106,7 +111,8 @@ class TdCARS:
         T21 = T2
         nuR1 = nuR
         A1 = A
-        return cls(sample, wl1, wl2, _wl3, _mono, td_exp, signal_exp, spectra, attenuation,tp1, tp2, tp3, tmin, tmax, floor, nuR1, T21, A1)
+        notes_df = pd.DataFrame()
+        return cls(notes_df, sample, wl1, wl2, _wl3, _mono, td_exp, signal_exp, spectra, attenuation,tp1, tp2, tp3, tmin, tmax, floor, nuR1, T21, A1, phi)
 
     @property
     def mono(self):
@@ -180,7 +186,7 @@ class TdCARS:
                 hs = np.concatenate((np.ones(p1), np.zeros(len(ts) - p1)))
             #hs = np.heaviside(t-ts,1)
             F1 = hs * (
-                self.A1[0] * np.exp(b21[0] * (t - ts) + self.phi1) +
+                self.A1[0] * np.exp(b21[0] * (t - ts) + self.phi1 * 1j) +
                 self.A1[1] * np.exp(b21[1] * (t - ts))
             ) * np.exp(a12 * ts**2)
 
@@ -205,7 +211,7 @@ class TdCARS:
             signal[j2] = norm * step2 * np.trapezoid(F2) + self.floor
         if showPlot:
             fig = plt.figure(figsize=(7,5))
-            plt.semilogy(self.td_exp, self.signal_exp_corrected, 'ko', mfc='none', label='Experimental Data')
+            plt.semilogy(self.td_arr, self.signal_exp_corrected, 'ko', mfc='none', label='Experimental Data')
             plt.semilogy(td, signal, 'r-', label='Fitted Data, '+r"$T_2$={:.0f}".format(self.T21[0])+" fs")
             plt.xlabel('Time Delay (fs)')
             plt.ylabel('CARS Signal (a.u.)')
@@ -343,8 +349,8 @@ class TdCARS:
         T2 : Estimated dephasing time [fs]
         dT2 : Uncertainty in the estimated dephasing time [fs]
         """
-        x = self.td_exp[(self.td_exp>=td1) & (self.td_exp<=td2)]
-        y = np.log(self.signal_exp_corrected[(self.td_exp>=td1) & (self.td_exp<=td2)])
+        x = self.td_arr[(self.td_arr>=td1) & (self.td_arr<=td2)]
+        y = np.log(self.signal_exp_corrected[(self.td_arr>=td1) & (self.td_arr<=td2)])
         (m, b), cov = np.polyfit(x, y, 1, cov=True)
         dm = 2.326*np.sqrt(cov[0, 0])  # uncertainty in slope at 98% confidence interval
         db = 2.326*np.sqrt(cov[1, 1])  # uncertainty in intercept at 98% confidence interval
@@ -352,7 +358,7 @@ class TdCARS:
         if show_plot:
             fig = plt.figure(figsize=(12,5))
             plt.subplot(1,3,1)
-            plt.semilogy(self.td_exp, self.signal_exp_corrected, 'ko', mfc='none', label='All Transient Data')
+            plt.semilogy(self.td_arr, self.signal_exp_corrected, 'ko', mfc='none', label='All Transient Data')
             plt.semilogy(x, np.exp(y), 'bo', mfc='none', label='Decay Data')
             plt.xlabel('Time Delay (fs)')
             plt.ylabel('CARS Signal (a.u.)')
