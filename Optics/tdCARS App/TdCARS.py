@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import itertools
+from scipy.interpolate import interp1d
 
 class TdCARS:
     def __init__(self, notes_df, sample, wl1, wl2, _wl3, _mono, td_exp, signal_exp, spectra, attenuation,tp1, tp2, tp3, tmin, tmax, floor, nuR1, T21, A1, phi=0):
@@ -21,6 +22,8 @@ class TdCARS:
         self._mono = _mono  # Monochromator setting [nm]
         self.td_arr = td_exp  # Experimental time delays [fs]
         self.signal_exp = signal_exp  # Experimental CARS signal [a.u.]
+        self.td_fit = None  # Experimental time delays [fs]
+        self.signal_fit = None  # Experimental CARS signal [a.u.]
         self.spectra = spectra  # CARS spectra [a.u.]
         self.attenuation = attenuation  # Attenuation values [a.u.]
 
@@ -204,25 +207,25 @@ class TdCARS:
         a3 = -4 * np.log(2) / self.tp3**2
         step2 = 5
 
-        td = np.arange(self.tmin + 5*self.tp3, self.tmax - 5*self.tp3 + step2, step2)
-        m2 = len(td)
+        self.td_fit = np.arange(self.tmin + 5*self.tp3, self.tmax - 5*self.tp3 + step2, step2)
+        m2 = len(self.td_fit)
 
-        signal = np.zeros(m2)
+        self.signal_fit = np.zeros(m2)
 
         for j2 in range(m2):
-            I3 = np.sqrt(-a3/np.pi) * np.exp(a3 * (t1 - td[j2])**2)
+            I3 = np.sqrt(-a3/np.pi) * np.exp(a3 * (t1 - self.td_fit[j2])**2)
             F2 = Q11 * I3
-            signal[j2] = norm * step2 * np.trapezoid(F2) + self.floor
+            self.signal_fit[j2] = norm * step2 * np.trapezoid(F2) + self.floor
         if showPlot:
             fig = plt.figure(figsize=(7,5))
             plt.semilogy(self.td_arr, self.signal_exp_corrected, 'ko', mfc='none', label='Experimental Data')
-            plt.semilogy(td, signal, 'r-', label='Fitted Data, '+r"$T_2$={:.0f}".format(self.T21[0])+" fs")
+            plt.semilogy(self.td_fit, self.signal_fit, 'r-', label='Fitted Data, '+r"$T_2$={:.0f}".format(self.T21[0])+" fs")
             plt.xlabel('Time Delay (fs)')
             plt.ylabel('CARS Signal (a.u.)')
             plt.title('CARS Signal: Experimental vs Fitted')
             plt.legend()
             plt.show()
-        return td, signal
+        return self.td_fit, self.signal_fit
     
     def get_spectra_contour(self, show_plot=False, **kwargs):
         #self.X_full,self.Y_full = np.arange(1,2049),self.td[:-1]
@@ -379,3 +382,19 @@ class TdCARS:
             plt.legend()
             plt.show()
         return T2, dT2
+    
+    def get_R2(self, td1=500, td2=4500):
+        fit_cars_linear = interp1d(self.td_fit, self.signal_fit, kind='linear')
+        y_true = self.signal_exp[(self.td_arr > td1) & (self.td_arr < td2)]
+        y_pred = fit_cars_linear(self.td_arr[(self.td_arr > td1) & (self.td_arr < td2)])
+        r2 = r_squared(y_true, y_pred)
+        return r2
+    
+def r_squared(y_true, y_pred):
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+
+    ss_res = np.sum((y_true - y_pred)**2)
+    ss_tot = np.sum((y_true - np.mean(y_true))**2)
+
+    return 1 - (ss_res / ss_tot)
