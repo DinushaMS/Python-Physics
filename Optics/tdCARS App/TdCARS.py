@@ -241,7 +241,8 @@ class TdCARS:
             Y = self.td_arr[(self.td_arr<kwargs['td_lim'][1])&(self.td_arr>kwargs['td_lim'][0])]
             spectra_sc_crop = spectra_sc_crop[(self.td_arr<kwargs['td_lim'][1])&(self.td_arr>kwargs['td_lim'][0]),:]
         
-        Z = np.log(spectra_sc_crop)
+        spectra_sc_crop[spectra_sc_crop <= 0] = 1
+        Z = np.log10(spectra_sc_crop)
         
         if show_plot:
             plt.figure(figsize=(4,3),dpi=150)
@@ -317,6 +318,7 @@ class TdCARS:
         return 1E7*(1/wl-1/self._wl3)
 
     def plot_spectra_at_td(self, td, show_plot=False):
+        td = self.td_arr[np.where(self.td_arr >= td)][0]
         spectra_at_td = self.spectra[np.where(self.td_arr >= td)[0][0],:]
         #spectra_at_td = spectra_at_td/np.max(spectra_at_td)
         if show_plot:
@@ -332,18 +334,19 @@ class TdCARS:
             plt.ylabel('CARS Signal (a.u.)')
             plt.title(f'CARS Spectrum at {td} fs Delay')
             plt.show()
-        return spectra_at_td
+        return td, spectra_at_td
     
-    def get_transient_at_wn(self,wn_target,showPlot=False):
-        res = self.spectra_sc_full[:,np.where(self.wn_as>=wn_target)[0][-1]]
+    def get_transient_at_wl(self,wl_target,showPlot=False):
+        wl = self.wl_as[np.where(self.wl_as>=wl_target)][0]
+        res = self.spectra_sc_full[:,np.where(self.wl_as>=wl_target)[0][-1]]
         if showPlot:
             plt.figure(figsize=(5,3),dpi=150)
             plt.yscale("log")
             plt.plot(self.td_arr, res, '-o',color = 'k', mfc='none', mec='k', mew=0.5, ms=2, lw=0.5)
-            plt.title(f"$CARS\,\, signal\,\,vs\,\, dellay\,\, @\,\, wavenumber\,\, =\,\, {self.wn_as[self.wn_as>=wn_target][-1]:.0f}\,$"+r"$cm^{-1}$"+"$\, for\,\, {self.sample}$")
+            plt.title(f"$CARS\,\, signal\,\,vs\,\, dellay\,\, @\,\, wavelength\,\, =\,\, {self.wl_as[self.wl_as>=wl_target][-1]:.0f}\,$"+r"$nm$"+"$\, for\,\, {self.sample}$")
             plt.xlabel("$delay\, [fs]$"); plt.ylabel("$Signal\, [counts]$")
             plt.grid(); plt.show()
-        return res
+        return wl, res
     
     def get_T2(self, td1, td2, show_plot=False):
         """
