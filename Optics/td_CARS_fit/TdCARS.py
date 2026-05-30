@@ -64,6 +64,11 @@ class TdCARS:
         cars_floor_file_path = cars_file_path[:-4]+"_Floor.dat"
         spectra_data = np.loadtxt(cars_spectra_file_path, delimiter='\t')
         cars_floor = np.loadtxt(cars_floor_file_path, delimiter='\t')
+        
+        # correct the floor array if it's 1D and expand it to 2D to match the raw spectra dimensions
+        if len(cars_floor.shape) == 1:
+            cars_floor = np.tile(cars_floor, (len(spectra_data[:,0]), 1))
+        
         td_exp = spectra_data[:,0]
         attSpectra = spectra_data[:,1]
         rawSpectra = spectra_data[:,2:]
@@ -251,7 +256,7 @@ class TdCARS:
                 max_idx = np.where(zx==max_zx)[0][0]
                 plt.plot(X[max_idx], y, 'rx', markersize=3)
             plt.title(f"CARS signal for delay vs pixel for {self.sample}")
-            plt.xlabel("$wavenumber$ [1/cm]"); plt.ylabel("$t_d\, [fs]$"); plt.grid(); plt.show()
+            plt.xlabel("$wavenumber$ [1/cm]"); plt.ylabel("$t_d [fs]$"); plt.grid(); plt.show()
         return Z
     
     def correct_experimental_data(self, corrections):
@@ -293,7 +298,6 @@ class TdCARS:
         h = np.sin(np.radians(-5.5))*318.719
         l = np.cos(np.radians(-5.5))*318.719
         m = b-np.arctan(((((cs/2)-px+1)*ps)+h)/l)
-        (np.sin(m)+np.sin(a))*(1000000/gd)
         return (np.sin(m)+np.sin(a))*(1000000/gd)
     
     def _px2wn(self, px):
@@ -313,34 +317,70 @@ class TdCARS:
         wl = self._px2wl(px)
         return 1E7*(1/wl-1/self._wl3)
 
-    def plot_spectra_at_td(self, td, show_plot=False):
-        spectra_at_td = self.spectra[np.where(self.td_arr >= td)[0][0],:]
+    def plot_spectra_at_td(self, td, show_plot=False, boxcar_window=1):
+        if isinstance(td, (list, tuple)):
+            spectra_at_td = np.zeros((len(td), self.spectra.shape[1]))
+            for i, t in enumerate(td):
+                spectra_at_td[i,:] = self.spectra[np.where(self.td_arr >= t)[0][0],:]
+        else:
+            spectra_at_td = np.zeros((1, self.spectra.shape[1]))
+            spectra_at_td[0,:] = self.spectra[np.where(self.td_arr >= td)[0][0],:]
         #spectra_at_td = spectra_at_td/np.max(spectra_at_td)
         if show_plot:
             fig = plt.figure(figsize=(10,5))
             plt.subplot(121)
-            plt.plot(self.wl_as, spectra_at_td)
+            for i in range(len(spectra_at_td[:,0])):
+                plt.plot(self.wl_as, self.boxcar_avg(spectra_at_td[i,:], boxcar_window), label=f'{td[i]} fs')
             plt.xlabel('Wavelength (nm)')
             plt.ylabel('CARS Signal (a.u.)')
             plt.title(f'CARS Spectrum at {td} fs Delay')
+            plt.legend()
             plt.subplot(122)
-            plt.plot(self.wn_as, self.plot_spectra_at_td(td))
+            for i in range(len(spectra_at_td[:,0])):
+                plt.plot(self.wn_as, self.boxcar_avg(spectra_at_td[i,:], boxcar_window), label=f'{td[i]} fs')
             plt.xlabel('Wavenumber (1/cm)')
             plt.ylabel('CARS Signal (a.u.)')
             plt.title(f'CARS Spectrum at {td} fs Delay')
+            plt.legend()
             plt.show()
         return spectra_at_td
     
-    def get_transient_at_wn(self,wn_target,showPlot=False):
-        res = self.spectra_sc_full[:,np.where(self.wn_as>=wn_target)[0][-1]]
+    def get_transient_at_wn(self,wn_target,showPlot=False):        
+        # if the target wavenumber is an array [min, max]:
+        if isinstance(wn_target, (list, tuple)):
+            res = np.max(self.spectra_sc_full[:,(self.wn_as>=wn_target[0])&(self.wn_as<=wn_target[1])], axis=1)
+        else:
+            res = self.spectra_sc_full[:,np.where(self.wn_as>=wn_target)[0][-1]]
         if showPlot:
             plt.figure(figsize=(5,3),dpi=150)
             plt.yscale("log")
             plt.plot(self.td_arr, res, '-o',color = 'k', mfc='none', mec='k', mew=0.5, ms=2, lw=0.5)
-            plt.title(f"$CARS\,\, signal\,\,vs\,\, dellay\,\, @\,\, wavenumber\,\, =\,\, {self.wn_as[self.wn_as>=wn_target][-1]:.0f}\,$"+r"$cm^{-1}$"+"$\, for\,\, {self.sample}$")
-            plt.xlabel("$delay\, [fs]$"); plt.ylabel("$Signal\, [counts]$")
+            if isinstance(wn_target, (list, tuple)):
+                plt.title(f"$CARS signal vs dellay @ wavenumber = {wn_target[0]:.0f} to {wn_target[1]:.0f}$"+r"$cm^{-1}$"+"$ for {self.sample}$")
+            else:
+                plt.title(f"$CARS signal vs dellay @ wavenumber = {self.wn_as[self.wn_as>=wn_target][-1]:.0f}$"+r"$cm^{-1}$"+"$ for {self.sample}$")
+            plt.xlabel("$delay [fs]$"); plt.ylabel("$Signal [counts]$")
             plt.grid(); plt.show()
         return res
+    
+    def boxcar_avg(self, x, window):
+        """
+        Moving average (boxcar) filter.
+
+        Parameters
+        ----------
+        x : array_like
+            Input 1D signal.
+        window : int
+            Number of points in the averaging window.
+
+        Returns
+        -------
+        ndarray
+            Smoothed signal.
+        """
+        kernel = np.ones(window) / window
+        return np.convolve(x, kernel, mode='same')
     
     def get_T2(self, td1, td2, show_plot=False):
         """
@@ -371,7 +411,7 @@ class TdCARS:
             plt.subplot(1,3,(2,3))
             plt.plot(x,y,'bo', mfc='none', label='Data for Linear Fit')
             plt.plot(x, m*x + b, 'r-', label='Linear Fit'+r", slope={:.0f}±{:.0f} fs".format(-2/m,2*dm/m**2))
-            plt.plot(x, (m+dm)*x + b+db, 'r--', label=r'$\pm$'+r'2.326$\sigma$'+'(98\% CI)')
+            plt.plot(x, (m+dm)*x + b+db, 'r--', label=r'$\pm$'+r'2.326$\sigma$'+'(98% CI)')
             plt.plot(x, (m-dm)*x + b-db, 'r--')
             plt.xlabel('Time Delay (fs)')
             plt.ylabel('ln(CARS Signal)')
