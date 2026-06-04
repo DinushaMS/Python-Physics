@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.signal import convolve
-
+from scipy.signal import find_peaks
 
 # ---------------------------------------------------------------------------
 # Physical constants
@@ -109,7 +109,7 @@ class TdCARS:
         self.floor = floor
 
         # Raman mode parameters
-        self.nuR  = np.atleast_1d(nuR)   # [cm⁻¹]
+        self._nuR  = np.atleast_1d(nuR)   # [cm⁻¹]
         self.T2   = np.atleast_1d(T2)    # [fs]
         self.A    = np.atleast_1d(A)     # [a.u.]
         self.phi  = phi                  # [rad]
@@ -135,7 +135,7 @@ class TdCARS:
         self.wn_as = self._px2wn(px)
 
         # Baseline-corrected spectral stack (always non-negative)
-        self.spectra_sc_full = self.spectra - self.spectra.min()
+        self.spectra_sc_full = self.spectra #- self.spectra.min()
 
         # Derived frequency quantities
         self._update_frequencies()
@@ -164,6 +164,7 @@ class TdCARS:
         -------
         TdCARS
         """
+        cars_file_path = str(cars_file_path)
         base = cars_file_path[:-4]
 
         # --- Notes ---
@@ -296,6 +297,15 @@ class TdCARS:
     def wl3(self, value):
         self._wl3 = value
         self.wn_as = self._px2wn(np.arange(_CHIP_SIZE))
+        self._update_frequencies()
+    @property
+    def nuR(self):
+        """Raman resonance frequencies [cm⁻¹]."""
+        return self._nuR
+    
+    @nuR.setter
+    def nuR(self, value):
+        self._nuR = value
         self._update_frequencies()
 
     # ------------------------------------------------------------------
@@ -449,7 +459,7 @@ class TdCARS:
     # Spectral analysis
     # ------------------------------------------------------------------
 
-    def get_spectra_contour(self, show_plot=False, wn_lim=None, td_lim=None):
+    def get_spectra_contour(self, show_plot=False, wn_lim=None, td_lim=None, no_of_peaks=1):
         """
         Compute (and optionally display) the log-intensity CARS spectral contour.
 
@@ -461,6 +471,8 @@ class TdCARS:
             ``(wn_min, wn_max)`` wavenumber crop range [cm⁻¹].
         td_lim : tuple of float, optional
             ``(td_min, td_max)`` time-delay crop range [fs].
+        no_of_peaks : int, optional
+            Number of peaks to mark at each delay. Default 1.
 
         Returns
         -------
@@ -477,11 +489,13 @@ class TdCARS:
         wn_mask = np.ones(len(self.wn_as), dtype=bool)
         td_mask = np.ones(len(self.td_arr), dtype=bool)
 
-        if wn_lim is not None:
-            wn_mask = (self.wn_as > wn_lim[0]) & (self.wn_as < wn_lim[1])
-        if td_lim is not None:
-            td_mask = (self.td_arr > td_lim[0]) & (self.td_arr < td_lim[1])
-
+        if wn_lim is None:
+            wn_lim = [self._px2wn(_CHIP_SIZE - 1), self._px2wn(0)]
+        if td_lim is None:
+            td_lim = [self.td_arr.min(), self.td_arr.max()]
+        print(wn_lim, td_lim)
+        wn_mask = (self.wn_as >= wn_lim[0]) & (self.wn_as <= wn_lim[1])
+        td_mask = (self.td_arr >= td_lim[0]) & (self.td_arr <= td_lim[1])
         X = self.wn_as[wn_mask]
         Y = self.td_arr[td_mask]
         cropped = self.spectra_sc_full[np.ix_(td_mask, wn_mask)]
@@ -491,6 +505,7 @@ class TdCARS:
         pos_vals = cropped[cropped > 0]
         fill = pos_vals.min() if pos_vals.size > 0 else 1.0
         Z = np.log(np.where(cropped > 0, cropped, fill))
+        P = np.zeros_like(Z)  # Placeholder for peak positions (not used in this implementation)
 
         if show_plot:
             # Use percentile-based colour limits so hot/cold outlier pixels
@@ -498,21 +513,51 @@ class TdCARS:
             vmin = np.percentile(Z, 2)
             vmax = np.percentile(Z, 98)
 
-            fig, ax = plt.subplots(figsize=(4, 3), dpi=150)
-            cf = ax.contourf(X, Y, Z, levels=20, vmin=vmin, vmax=vmax, cmap="viridis")
-            fig.colorbar(cf, ax=ax, label="ln(counts)")
+            fig, axes = plt.subplots(1, 2, figsize=(10, 5), dpi=150)
+            cf = axes[0].contourf(X, Y, Z, levels=20, vmin=vmin, vmax=vmax, cmap="viridis")
+            fig.colorbar(cf, ax=axes[0], label="ln(counts)")
 
             # Mark spectral peak at each delay
-            peak_idx = np.argmax(Z, axis=1)
-            ax.plot(X[peak_idx], Y, "rx", markersize=3)
+            #peak_idx = np.argmax(Z, axis=1)
+            #ax.plot(X[peak_idx], Y, "rx", markersize=3)
+            for i, td in enumerate(Y):
+                spec_sm = self.plot_spectra_at_td([td], show_plot=False, boxcar_window=20)[0]
+                spec_norm = (spec_sm - np.min(spec_sm)) / (np.max(spec_sm) - np.min(spec_sm))
+                peaks, properties = find_peaks(spec_norm, prominence=0.01)  # Adjust parameters as needed
+                top_idxes = peaks[np.argsort(properties["prominences"])[-no_of_peaks:][::-1]]
+                axes[0].plot(X[top_idxes], np.ones_like(X[top_idxes]) * td, "rx", markersize=3)
+                P[i, top_idxes] = 1  # Mark peaks in the P array
+            
+            axes[0].set_title(f"CARS Spectral Contour: {self.sample}", fontsize=10)
+            axes[0].set_xlabel("Wavenumber [cm⁻¹]")
+            axes[0].set_ylabel("Time delay [fs]")
+            axes[0].grid(True)
+            
+            peak_wns = []
+            for i, td in enumerate(Y):
+                peak_wns.append(X[P[i,:]==1])
 
-            ax.set_title(f"CARS contour – {self.sample}")
-            ax.set_xlabel("Wavenumber [cm⁻¹]")
-            ax.set_ylabel("Time delay [fs]")
-            ax.grid(True)
+            hist = np.histogram(np.concatenate(peak_wns), bins=30)
+
+            x, y = hist[1][:-1], hist[0]
+            y = self.boxcar_avg(y, 5)
+            y = (y - np.min(y)) / (np.max(y) - np.min(y))  # Normalize to [0, 1]
+            # add dummy points at the start and end to ensure peaks are detected at the edges
+            x = np.concatenate(([x[0] - 1], x, [x[-1] + 1]))
+            y = np.concatenate(([0], y, [0]))
+            peaks, _ = find_peaks(y, height=0.2, distance=10)  # Adjust parameters as needed
+            axes[1].plot(x, y, color="blue")
+            axes[1].scatter(x[peaks], y[peaks], color="red", s=50)
+            for idx in peaks:
+                axes[1].text(x[idx], y[idx], f"{int(x[idx])} cm⁻¹", fontsize=8, ha='center', va='bottom')
+            
+            axes[1].set_title("Peak wavenumber distribution: td={}–{} fs, wn={}–{} cm⁻¹".format(int(td_lim[0]), int(td_lim[1]), int(wn_lim[0]), int(wn_lim[1])), fontsize=10)
+            axes[1].set_xlabel("Wavenumber [cm⁻¹]")
+            axes[1].set_ylabel("Normalized count")
+            plt.tight_layout()
             plt.show()
 
-        return Z
+        return Z, P
 
     def plot_spectra_at_td(self, td, show_plot=False, boxcar_window=1):
         """
@@ -535,13 +580,14 @@ class TdCARS:
         tds = np.atleast_1d(td)
         indices = [np.searchsorted(self.td_arr, t) for t in tds]
         spectra_at_td = self.spectra[indices, :]
+        smoothed = np.array([self.boxcar_avg(spectra_at_td[i], boxcar_window) for i in range(len(tds))])
 
         if show_plot:
             fig, axes = plt.subplots(1, 2, figsize=(10, 5))
             for i, t in enumerate(tds):
-                smoothed = self.boxcar_avg(spectra_at_td[i], boxcar_window)
-                axes[0].plot(self.wl_as, smoothed, label=f"{t} fs")
-                axes[1].plot(self.wn_as, smoothed, label=f"{t} fs")
+                smoothed[i] = self.boxcar_avg(spectra_at_td[i], boxcar_window)
+                axes[0].plot(self.wl_as, smoothed[i], label=f"{t} fs")
+                axes[1].plot(self.wn_as, smoothed[i], label=f"{t} fs")
 
             for ax, xlabel in zip(axes, ["Wavelength (nm)", "Wavenumber (cm⁻¹)"]):
                 ax.set_xlabel(xlabel)
@@ -551,7 +597,7 @@ class TdCARS:
             plt.tight_layout()
             plt.show()
 
-        return spectra_at_td
+        return smoothed
 
     def get_transient_at_wn(self, wn_target, show_plot=False):
         """
@@ -566,22 +612,24 @@ class TdCARS:
 
         Returns
         -------
-        res : ndarray, shape (N,)
-            CARS intensity as a function of time delay.
+        td : ndarray
+            Time-delay axis [fs].
+        signal : ndarray
+            Integrated CARS signal [a.u.].
         """
         sc = self.spectra_sc_full
         if isinstance(wn_target, (list, tuple)):
             mask = (self.wn_as >= wn_target[0]) & (self.wn_as <= wn_target[1])
-            res  = sc[:, mask].max(axis=1)
+            signal  = sc[:, mask].max(axis=1)
             label = f"{wn_target[0]:.0f}–{wn_target[1]:.0f} cm⁻¹"
         else:
             idx  = np.searchsorted(self.wn_as, wn_target)
-            res  = sc[:, idx]
+            signal  = sc[:, idx]
             label = f"{self.wn_as[idx]:.0f} cm⁻¹"
 
         if show_plot:
             fig, ax = plt.subplots(figsize=(5, 3), dpi=150)
-            ax.semilogy(self.td_arr, res, "-o", color="k",
+            ax.semilogy(self.td_arr, signal, "-o", color="k",
                         mfc="none", mec="k", mew=0.5, ms=2, lw=0.5)
             ax.set_title(f"CARS transient @ {label} – {self.sample}")
             ax.set_xlabel("Delay [fs]")
@@ -589,7 +637,7 @@ class TdCARS:
             ax.grid(True)
             plt.show()
 
-        return res
+        return self.td_arr, signal
 
     # ------------------------------------------------------------------
     # Data correction
